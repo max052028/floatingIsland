@@ -96,7 +96,8 @@ function discTexture(core, soft) {
  * in-game hour plus the current weather parameters.
  */
 export class Sky {
-  constructor(scene) {
+  /** @param {{shadowSize?: number}} [opts] shadowSize: sun shadow-map resolution (lower on phones). */
+  constructor(scene, { shadowSize = 2048 } = {}) {
     this.cur = makeCur();
     this.sunDir = new THREE.Vector3(0, 1, 0);
     this.moonDir = new THREE.Vector3(0, -1, 0);
@@ -193,7 +194,7 @@ export class Sky {
     // lights
     this.sunLight = new THREE.DirectionalLight(0xffffff, 1);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(2048, 2048);
+    this.sunLight.shadow.mapSize.set(shadowSize, shadowSize);
     const cam = this.sunLight.shadow.camera;
     cam.left = -19;
     cam.right = 19;

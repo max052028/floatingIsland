@@ -20,6 +20,7 @@ import { Sky } from './world/sky.js';
 
 import { createDebugPanel } from './ui/debug.js';
 import { Hud } from './ui/hud.js';
+import { createTouchUi } from './ui/touch.js';
 
 // ---- renderer -------------------------------------------------------------------------------
 
@@ -31,7 +32,10 @@ try {
   document.body.innerHTML = '<p style="color:#fff;padding:2em;font:16px sans-serif">這個瀏覽器無法啟動 WebGL，沒辦法執行遊戲。</p>';
   throw err;
 }
-const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+// Phones get a lighter renderer: fewer pixels and a smaller shadow map.
+const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
+if (coarse) document.body.classList.add('touch');
+const pixelRatio = Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2);
 renderer.setPixelRatio(pixelRatio);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
@@ -56,7 +60,7 @@ const state = loadGame() ?? GameState.fresh();
 const weather = new WeatherSystem();
 const selection = { tool: 'farm', seed: 'wheat', building: 'workbench' };
 
-const sky = new Sky(scene);
+const sky = new Sky(scene, { shadowSize: coarse ? 1024 : 2048 });
 const island = createIsland();
 scene.add(island.group);
 const clouds = new Clouds(scene);
@@ -70,12 +74,33 @@ scene.add(player.group);
 const input = new Input(canvas);
 const rig = new CameraRig(camera);
 
+// hybrid devices (touch laptops) switch the touch UI on at the first real touch
+window.addEventListener(
+  'pointerdown',
+  (e) => {
+    if (e.pointerType === 'touch') document.body.classList.add('touch');
+  },
+  { capture: true },
+);
+
+let shownTouchTip = false;
+/** Switches the camera and, on touch screens, explains the controls of the new view once. */
+function toggleCamera() {
+  const mode = rig.toggle(player);
+  hud.setCameraMode(mode);
+  if (mode === 'third' && !shownTouchTip && document.body.classList.contains('touch')) {
+    shownTouchTip = true;
+    hud.toast('👆 左側拖曳走路・右側拖曳環顧・右下按鈕動作', 'info');
+  }
+}
+
 const hud = new Hud({
   state,
   weather,
   selection,
   handlers: {
-    onToggleCamera: () => hud.setCameraMode(rig.toggle(player)),
+    onToggleCamera: toggleCamera,
+    onDebug: () => debug.toggle(),
     onFulfill: (id) => {
       const res = state.fulfillOrder(id);
       hud.toast(res.message, res.ok ? 'good' : 'bad');
@@ -105,6 +130,8 @@ const debug = createDebugPanel({
     location.reload();
   },
 });
+
+const touchUi = createTouchUi({ input, hud });
 
 // ---- interaction ------------------------------------------------------------------------------
 
@@ -139,7 +166,7 @@ function performAction(cell) {
 function handleKey(code) {
   switch (code) {
     case 'KeyC':
-      hud.setCameraMode(rig.toggle(player));
+      toggleCamera();
       break;
     case 'Digit1':
       hud.selectTool('farm');
@@ -190,8 +217,11 @@ function frame(now) {
 
   // input
   for (const code of input.consumePressed()) handleKey(code);
+  input.setMode(rig.mode);
   const intent = rig.update(dt, input, player);
-  const speed = 4.2 * (input.sprint ? 1.8 : 1);
+  // a half-pushed joystick walks slower; the keyboard always gives a full push
+  const push = Math.min(1, Math.hypot(intent.x, intent.z));
+  const speed = 4.2 * (input.sprint ? 1.8 : 1) * push;
   player.update(dt, intent.x, intent.z, speed);
   camera.updateMatrixWorld();
 
@@ -225,6 +255,7 @@ function frame(now) {
   cursor.update(elapsed);
 
   hud.update(dt);
+  touchUi.update();
   debug.update();
   renderer.render(scene, camera);
 }
@@ -242,7 +273,12 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') save();
 });
 
-hud.toast('🏝️ 歡迎來到浮空島！先試著收成或種點東西吧', 'info');
+hud.toast(
+  document.body.classList.contains('touch')
+    ? '🏝️ 歡迎！拖曳移動、雙指縮放旋轉、點格子動作'
+    : '🏝️ 歡迎來到浮空島！先試著收成或種點東西吧',
+  'info',
+);
 
 // Handy for poking around in the browser console.
-window.__game = { state, weather, events, sky, clouds, precip, farm, hud, rig, player, camera, scene, renderer, selection };
+window.__game = { state, weather, events, sky, clouds, precip, farm, hud, rig, player, camera, scene, renderer, selection, input, touchUi };

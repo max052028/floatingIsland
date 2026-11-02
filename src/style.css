@@ -10,6 +10,11 @@
   --good: #4fae6a;
   --bad: #d9645c;
   --radius: 14px;
+  --sa-t: env(safe-area-inset-top, 0px);
+  --sa-r: env(safe-area-inset-right, 0px);
+  --sa-b: env(safe-area-inset-bottom, 0px);
+  --sa-l: env(safe-area-inset-left, 0px);
+  --bottom-h: 150px; /* kept in sync with the bottom bar by hud.js */
   font-family: system-ui, -apple-system, 'Segoe UI', 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
 }
 
@@ -26,6 +31,10 @@ body {
   color: var(--ink);
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  touch-action: manipulation; /* no double-tap zoom on the HUD */
 }
 
 #scene {
@@ -35,6 +44,7 @@ body {
   height: 100%;
   display: block;
   outline: none;
+  touch-action: none; /* all gestures on the world are handled by input.js */
 }
 
 #hud {
@@ -62,8 +72,8 @@ body {
 
 #status {
   position: absolute;
-  top: 12px;
-  left: 12px;
+  top: calc(12px + var(--sa-t));
+  left: calc(12px + var(--sa-l));
   display: flex;
   gap: 14px;
   padding: 9px 14px;
@@ -73,8 +83,8 @@ body {
 
 #inventory {
   position: absolute;
-  top: 58px;
-  left: 12px;
+  top: calc(58px + var(--sa-t));
+  left: calc(12px + var(--sa-l));
   max-width: min(360px, 60vw);
   display: flex;
   flex-wrap: wrap;
@@ -116,12 +126,21 @@ body {
 
 #orders {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: calc(12px + var(--sa-t));
+  right: calc(12px + var(--sa-r));
   width: 270px;
-  max-height: calc(100% - 24px);
+  max-height: calc(100% - 24px - var(--sa-t) - var(--sa-b));
   overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: 12px;
+}
+
+#orders-toggle,
+#dbg-btn,
+#act,
+#stick {
+  display: none;
 }
 
 #orders h3,
@@ -215,9 +234,11 @@ body {
   transition: transform 0.08s, background 0.15s, box-shadow 0.15s;
 }
 
-.btn:hover:not(:disabled) {
-  background: #fff;
-  box-shadow: 0 2px 10px rgba(30, 40, 90, 0.15);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(30, 40, 90, 0.15);
+  }
 }
 
 .btn:active:not(:disabled) {
@@ -246,16 +267,23 @@ body {
 #bottom {
   position: absolute;
   left: 50%;
-  bottom: 14px;
+  bottom: calc(14px + var(--sa-b));
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  max-width: calc(100vw - 24px);
+  width: max-content; /* an absolutely positioned box at left:50% would otherwise be squeezed to half the screen */
+  max-width: calc(100vw - 24px - var(--sa-l) - var(--sa-r));
 }
 
 #hint {
+  position: absolute; /* floats above the bar so it never makes the bar taller */
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
   min-height: 30px;
   padding: 5px 14px;
   border-radius: 999px;
@@ -346,16 +374,16 @@ body {
 
 #cam {
   position: absolute;
-  left: 12px;
-  bottom: 96px;
+  left: calc(12px + var(--sa-l));
+  bottom: calc(96px + var(--sa-b));
   padding: 8px 12px;
   font-weight: 600;
 }
 
 #help {
   position: absolute;
-  left: 12px;
-  bottom: 12px;
+  left: calc(12px + var(--sa-l));
+  bottom: calc(12px + var(--sa-b));
   padding: 8px 12px;
   font-size: 12px;
   line-height: 1.6;
@@ -367,7 +395,8 @@ body {
 
 #toasts {
   position: absolute;
-  top: 14px;
+  top: calc(14px + var(--sa-t));
+  pointer-events: none;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -433,6 +462,7 @@ body {
 .modal-card {
   width: min(460px, calc(100vw - 24px));
   max-height: calc(100vh - 40px);
+  max-height: calc(100dvh - 40px);
   overflow: auto;
   padding: 14px;
   background: var(--glass-strong);
@@ -498,9 +528,11 @@ body {
 
 #debug {
   position: absolute;
-  top: 110px;
-  left: 12px;
-  width: 300px;
+  top: calc(110px + var(--sa-t));
+  left: calc(12px + var(--sa-l));
+  width: min(300px, calc(100vw - 24px));
+  max-height: calc(100% - 130px - var(--sa-t) - var(--sa-b));
+  overflow: auto;
   padding: 10px 12px;
   font-size: 12px;
 }
@@ -524,15 +556,276 @@ body {
   flex-wrap: wrap;
 }
 
-@media (max-width: 760px) {
-  #orders {
-    width: 210px;
-    padding: 8px;
+/* ---- touch devices ------------------------------------------------------------------- */
+
+body.touch #help,
+body.touch .btn.tool kbd,
+body.touch #cam .kbd {
+  display: none;
+}
+
+body.touch #dbg-btn {
+  display: block;
+  position: absolute;
+  left: calc(12px + var(--sa-l));
+  bottom: calc(144px + var(--sa-b));
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  font-size: 20px;
+}
+
+/* blurring a live WebGL canvas behind every panel is costly on phones */
+body.touch .panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+/* pop-overs sit on top of other controls, so they must not be see-through */
+body.touch #orders,
+body.touch #debug,
+body.touch .modal-card {
+  background: rgba(255, 255, 255, 0.97);
+}
+
+body.touch .btn.small {
+  padding: 9px 14px;
+}
+
+body.touch .chip.opt {
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+body.touch #debug .btn.small {
+  padding: 8px 10px;
+}
+
+/* floating joystick: appears under the thumb */
+#stick {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#stick[hidden] {
+  display: none !important;
+}
+
+body.touch #stick {
+  display: block;
+}
+
+#stick .base,
+#stick .knob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 50%;
+  will-change: transform;
+}
+
+#stick .base {
+  width: 112px;
+  height: 112px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 4px 18px rgba(20, 30, 70, 0.25);
+}
+
+#stick .knob {
+  width: 48px;
+  height: 48px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 2px 10px rgba(20, 30, 70, 0.35);
+}
+
+/* the action button of the third-person view */
+body.touch.third #act {
+  display: flex;
+}
+
+#act {
+  position: absolute;
+  right: calc(16px + var(--sa-r));
+  bottom: calc(var(--bottom-h) + 30px + var(--sa-b));
+  width: 78px;
+  height: 78px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  border-radius: 50%;
+  font: inherit;
+  color: var(--ink);
+  cursor: pointer;
+  touch-action: none;
+  transition: transform 0.08s, background 0.15s, border-color 0.15s;
+}
+
+#act .ico {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+#act .txt {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+#act.ready {
+  background: #dff3e6;
+  border-color: #8fd0a2;
+}
+
+#act.pressed {
+  transform: scale(0.92);
+  background: var(--accent);
+}
+
+/* ---- narrow or short screens (phones, either way up) ---------------------------------- */
+
+@media (max-width: 640px), (max-height: 520px) {
+  #status {
+    gap: 9px;
+    padding: 8px 11px;
+    font-size: 13px;
+  }
+  #status .wxl,
+  #cam .txt,
+  #cam .kbd {
+    display: none;
+  }
+  #inventory {
+    top: calc(52px + var(--sa-t));
+    max-width: calc(100vw - 24px - var(--sa-l) - var(--sa-r));
+    padding: 6px 8px;
   }
   #help {
     display: none;
   }
+
+  /* orders become a pop-over behind a 📋 button */
+  #orders-toggle {
+    display: block;
+    position: absolute;
+    top: calc(10px + var(--sa-t));
+    right: calc(12px + var(--sa-r));
+    padding: 8px 12px;
+    font-weight: 600;
+  }
+  #orders-toggle.ready {
+    background: #dff3e6;
+    border-color: #8fd0a2;
+    color: #1f6a3a;
+  }
+  #orders {
+    display: none;
+    z-index: 5;
+    top: calc(56px + var(--sa-t));
+    width: min(320px, calc(100vw - 24px - var(--sa-l) - var(--sa-r)));
+    max-height: calc(100% - 68px - var(--sa-t) - var(--sa-b));
+  }
+  body.orders-open #orders {
+    display: block;
+  }
+
+  /* camera + debug buttons go to the right edge, under the 📋 button */
   #cam {
-    bottom: 96px;
+    left: auto;
+    bottom: auto;
+    top: calc(56px + var(--sa-t));
+    right: calc(12px + var(--sa-r));
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    font-size: 22px;
+  }
+  body.touch #dbg-btn {
+    left: auto;
+    bottom: auto;
+    top: calc(108px + var(--sa-t));
+    right: calc(12px + var(--sa-r));
+    width: 46px;
+    height: 46px;
+  }
+
+  /* keep toasts clear of the buttons on the right edge */
+  #toasts {
+    top: calc(100px + var(--sa-t));
+    left: calc(12px + var(--sa-l));
+    right: calc(70px + var(--sa-r));
+    transform: none;
+    width: auto;
+    align-items: flex-start;
+  }
+  .toast {
+    font-size: 13px;
+    padding: 7px 14px;
+    text-align: center;
+  }
+
+  .btn.tool {
+    min-width: 62px;
+  }
+  #toolbar {
+    gap: 6px;
+    padding: 6px;
+  }
+}
+
+/* phones held sideways: very little height to spare, so the bottom bar shrinks */
+@media (max-height: 520px) {
+  #inventory {
+    top: calc(48px + var(--sa-t));
+  }
+  #toasts {
+    top: calc(10px + var(--sa-t));
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: max(200px, min(340px, calc(100vw - 540px)));
+    align-items: center;
+  }
+  #subbar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: calc(100vw - 24px - var(--sa-l) - var(--sa-r));
+    padding: 5px 7px;
+  }
+  .chip.opt {
+    flex: none;
+  }
+  #toolbar {
+    gap: 5px;
+    padding: 5px;
+  }
+  .btn.tool {
+    min-width: 50px;
+    padding: 4px 8px 3px;
+  }
+  .btn.tool .ico {
+    font-size: 20px;
+  }
+  .btn.tool .lbl {
+    display: none;
+  }
+  #bottom {
+    gap: 6px;
+    bottom: calc(8px + var(--sa-b));
+  }
+  #act {
+    width: 70px;
+    height: 70px;
+    bottom: calc(var(--bottom-h) + 18px + var(--sa-b));
+  }
+  #orders {
+    top: calc(52px + var(--sa-t));
+    max-height: calc(100% - 62px - var(--sa-t) - var(--sa-b));
+  }
+  #debug {
+    top: calc(52px + var(--sa-t));
+    max-height: calc(100% - 62px - var(--sa-t) - var(--sa-b));
   }
 }

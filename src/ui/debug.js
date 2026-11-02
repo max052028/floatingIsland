@@ -44,6 +44,8 @@ export function createDebugPanel({ state, weather, events, onReset }) {
   let scrubbing = false;
   slider.addEventListener('pointerdown', () => (scrubbing = true));
   slider.addEventListener('pointerup', () => (scrubbing = false));
+  slider.addEventListener('pointercancel', () => (scrubbing = false));
+  slider.addEventListener('change', () => (scrubbing = false));
   slider.addEventListener('input', () => {
     state.time = Math.min(23.99, Number(slider.value));
   });

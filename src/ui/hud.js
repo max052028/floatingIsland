@@ -42,7 +42,7 @@ export class Hud {
    * @param {import('../game/state.js').GameState} opts.state
    * @param {import('../game/weather.js').WeatherSystem} opts.weather
    * @param {{tool:string, seed:string, building:string}} opts.selection
-   * @param {{onToggleCamera:()=>void, onFulfill:(id:number)=>void, onCraft:(id:string)=>void}} opts.handlers
+   * @param {{onToggleCamera:()=>void, onFulfill:(id:number)=>void, onCraft:(id:string)=>void, onDebug?:()=>void}} opts.handlers
    */
   constructor({ state, weather, selection, handlers }) {
     this.state = state;
@@ -73,12 +73,24 @@ export class Hud {
 
   build() {
     this.coinsEl = el('span', { class: 'coins' });
-    this.clockEl = el('span', { class: 'clock' });
-    this.weatherEl = el('span', { class: 'wx' });
+    this.phaseEl = el('span', { class: 'ph' });
+    this.dayEl = el('span', { class: 'dy' });
+    this.timeEl = el('span', { class: 'tm' });
+    this.clockEl = el('span', { class: 'clock' }, [this.phaseEl, this.dayEl, this.timeEl]);
+    this.wxIconEl = el('span', { class: 'wxi' });
+    this.wxLabelEl = el('span', { class: 'wxl' });
+    this.weatherEl = el('span', { class: 'wx' }, [this.wxIconEl, this.wxLabelEl]);
     this.statusEl = el('div', { id: 'status', class: 'panel' }, [this.coinsEl, this.clockEl, this.weatherEl]);
 
     this.inventoryEl = el('div', { id: 'inventory', class: 'panel' });
 
+    // on narrow screens the orders live behind this button instead of covering the island
+    this.ordersBtn = el('button', {
+      id: 'orders-toggle',
+      class: 'panel btn',
+      'aria-label': '訂單',
+      onClick: () => this.toggleOrders(),
+    });
     this.ordersListEl = el('div', { class: 'list' });
     this.ordersEl = el('aside', { id: 'orders', class: 'panel' }, [
       el('h3', { text: '📋 地面居民的訂單' }),
@@ -92,7 +104,22 @@ export class Hud {
     this.toolbarEl = el('div', { id: 'toolbar', class: 'panel' });
     this.bottomEl = el('div', { id: 'bottom' }, [this.hintEl, this.subbarEl, this.toolbarEl]);
 
-    this.camBtn = el('button', { id: 'cam', class: 'panel btn', onClick: () => this.handlers.onToggleCamera() });
+    this.camIcoEl = el('span', { class: 'ico' });
+    this.camTxtEl = el('span', { class: 'txt' });
+    this.camKbdEl = el('span', { class: 'kbd', text: ' (C)' });
+    this.camBtn = el('button', { id: 'cam', class: 'panel btn', 'aria-label': '切換視角', onClick: () => this.handlers.onToggleCamera() }, [
+      this.camIcoEl,
+      this.camTxtEl,
+      this.camKbdEl,
+    ]);
+    // touch screens have no F2 key
+    this.dbgBtn = el('button', {
+      id: 'dbg-btn',
+      class: 'panel btn',
+      'aria-label': '除錯面板',
+      text: '🛠',
+      onClick: () => this.handlers.onDebug?.(),
+    });
     this.helpEl = el('div', { id: 'help', class: 'panel' });
 
     this.craftBody = el('div', { class: 'craft-body' });
@@ -109,13 +136,20 @@ export class Hud {
     this.root.append(
       this.statusEl,
       this.inventoryEl,
+      this.ordersBtn,
       this.ordersEl,
       this.toastsEl,
       this.bottomEl,
       this.camBtn,
+      this.dbgBtn,
       this.helpEl,
       this.craftEl,
     );
+
+    // lets floating controls (the action button) sit just above whatever the bottom bar grows to
+    const syncBottom = () => document.documentElement.style.setProperty('--bottom-h', `${this.bottomEl.offsetHeight}px`);
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(syncBottom).observe(this.bottomEl);
+    syncBottom();
   }
 
   // ---- public API --------------------------------------------------------------------------
@@ -141,6 +175,11 @@ export class Hud {
   setCameraMode(mode) {
     this.cameraMode = mode;
     this.dirty.help = true;
+    document.body.classList.toggle('third', mode === 'third');
+  }
+
+  toggleOrders(open = !document.body.classList.contains('orders-open')) {
+    document.body.classList.toggle('orders-open', open);
   }
 
   get modalOpen() {
@@ -207,9 +246,12 @@ export class Hud {
 
   renderClock() {
     const s = this.state;
-    this.clockEl.textContent = `${phaseIcon(s.time)} 第 ${s.day} 天 ${formatClock(s.time)}`;
+    this.phaseEl.textContent = phaseIcon(s.time);
+    this.dayEl.textContent = ` 第 ${s.day} 天 `;
+    this.timeEl.textContent = formatClock(s.time);
     const def = WEATHER[this.weather.type];
-    this.weatherEl.textContent = `${def.icon} ${def.label}`;
+    this.wxIconEl.textContent = def.icon;
+    this.wxLabelEl.textContent = ` ${def.label}`;
   }
 
   renderInventory() {
@@ -226,6 +268,9 @@ export class Hud {
     this.dirty.orders = false;
     const s = this.state;
     this.orderRefs = [];
+    const ready = s.orders.filter((o) => s.hasItems(o.items)).length;
+    this.ordersBtn.textContent = ready ? `📋 ${s.orders.length} ✓` : `📋 ${s.orders.length}`;
+    this.ordersBtn.classList.toggle('ready', ready > 0);
     if (s.orders.length === 0) {
       this.ordersListEl.replaceChildren(el('p', { class: 'empty', text: '目前沒有訂單，居民很快就會來拜託你。' }));
       return;
@@ -313,7 +358,8 @@ export class Hud {
   renderHelp() {
     this.dirty.help = false;
     const iso = this.cameraMode === 'iso';
-    this.camBtn.textContent = iso ? '🎥 切換到第三人稱 (C)' : '🎥 切換到 45° 視角 (C)';
+    this.camIcoEl.textContent = iso ? '🚶' : '🗺️';
+    this.camTxtEl.textContent = iso ? ' 切換到第三人稱' : ' 切換到 45° 視角';
     const lines = iso
       ? ['WASD 平移　Q/E 或右鍵拖曳 旋轉　滾輪 縮放', '左鍵 執行動作　Tab 切換種子/建築']
       : ['WASD 走路（Shift 加速）　右鍵拖曳 環顧（往上拖可仰望天空）', '空白鍵或左鍵 對面前的格子執行動作'];

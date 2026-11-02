@@ -7,6 +7,14 @@ const THIRD_FOV = 62;
 const PAN_LIMIT = 11.5;
 const BLEND_SECONDS = 1.1;
 
+/**
+ * The 45° framing was tuned for a landscape screen. On a tall (portrait) screen the horizontal
+ * field of view shrinks, so back the camera off to keep the farm in view.
+ */
+const isoDistScale = (aspect) => clamp(Math.pow(1.6 / aspect, 0.425), 1, 2);
+/** Portrait screens also get a wider third-person lens, otherwise the view feels like a tunnel. */
+const thirdFov = (aspect) => THIRD_FOV + 12 * clamp((1 - aspect) / 0.5, 0, 1);
+
 const moveToward = (a, b, d) => (Math.abs(b - a) <= d ? b : a + Math.sign(b - a) * d);
 const damp = (current, goal, rate, dt) => current + (goal - current) * (1 - Math.exp(-rate * dt));
 
@@ -81,11 +89,22 @@ export class CameraRig {
     const rot = input.rotateAxis();
     const drag = input.consumeDrag();
     const wheel = input.consumeWheel();
+    const pan = input.consumePan();
+    const pinch = input.consumePinch();
     const intent = { x: 0, z: 0 };
+    const aspect = this.camera.aspect || 1;
+    const isoK = isoDistScale(aspect);
 
     if (this.mode === 'iso') {
       iso.yawGoal += rot * 1.8 * dt - drag.x * 0.006;
       iso.distGoal = clamp(iso.distGoal * Math.exp(wheel * 0.001), 14, 50);
+      if (pinch.zoom !== 1 || pinch.twist !== 0) {
+        // fingers follow the map 1:1, so move the smoothed values too instead of letting them lag
+        iso.distGoal = clamp(iso.distGoal / pinch.zoom, 14, 50);
+        iso.dist = clamp(iso.dist / pinch.zoom, 14, 50);
+        iso.yawGoal += pinch.twist;
+        iso.yaw += pinch.twist;
+      }
 
       // pan relative to where the camera is looking
       const fx = -Math.sin(iso.yaw);
@@ -95,12 +114,30 @@ export class CameraRig {
       const speed = 10 * (iso.dist / 38) * (input.sprint ? 1.8 : 1);
       iso.goal.x += (fx * axis.y + rx * axis.x) * speed * dt;
       iso.goal.z += (fz * axis.y + rz * axis.x) * speed * dt;
-      const r = Math.hypot(iso.goal.x, iso.goal.z);
-      if (r > PAN_LIMIT) iso.goal.multiplyScalar(PAN_LIMIT / r);
+
+      // dragging the map with a finger: the ground under the finger stays under the finger
+      if (pan.x !== 0 || pan.y !== 0) {
+        const perPx = (2 * iso.dist * isoK * Math.tan(((ISO_FOV / 2) * Math.PI) / 180)) / (window.innerHeight || 800);
+        const side = -pan.x * perPx;
+        const ahead = (pan.y * perPx) / Math.sin(ISO_PITCH); // the ground is foreshortened vertically
+        const dx = rx * side + fx * ahead;
+        const dz = rz * side + fz * ahead;
+        iso.goal.x += dx;
+        iso.goal.z += dz;
+        iso.target.x += dx;
+        iso.target.z += dz;
+      }
+      for (const v of [iso.goal, iso.target]) {
+        const r = Math.hypot(v.x, v.z);
+        if (r > PAN_LIMIT) {
+          v.x *= PAN_LIMIT / r;
+          v.z *= PAN_LIMIT / r;
+        }
+      }
     } else {
       third.yawGoal += rot * 1.8 * dt - drag.x * 0.005;
       third.pitchGoal = clamp(third.pitchGoal + drag.y * 0.004, -0.6, 1.2);
-      third.distGoal = clamp(third.distGoal * Math.exp(wheel * 0.001), 3, 10);
+      third.distGoal = clamp((third.distGoal * Math.exp(wheel * 0.001)) / pinch.zoom, 3, 10);
 
       const fx = -Math.sin(third.yaw);
       const fz = -Math.cos(third.yaw);
@@ -123,9 +160,9 @@ export class CameraRig {
     const cp = Math.cos(ISO_PITCH);
     this._lookIso.copy(iso.target);
     this._posIso.set(
-      iso.target.x + Math.sin(iso.yaw) * cp * iso.dist,
-      Math.sin(ISO_PITCH) * iso.dist,
-      iso.target.z + Math.cos(iso.yaw) * cp * iso.dist,
+      iso.target.x + Math.sin(iso.yaw) * cp * iso.dist * isoK,
+      Math.sin(ISO_PITCH) * iso.dist * isoK,
+      iso.target.z + Math.cos(iso.yaw) * cp * iso.dist * isoK,
     );
 
     const head = player.position;
@@ -145,7 +182,7 @@ export class CameraRig {
     this._look.lerpVectors(this._lookIso, this._lookThird, e);
     this.camera.lookAt(this._look);
 
-    const fov = lerp(ISO_FOV, THIRD_FOV, e);
+    const fov = lerp(ISO_FOV, thirdFov(aspect), e);
     if (Math.abs(this.camera.fov - fov) > 0.01) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
